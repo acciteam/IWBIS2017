@@ -1,0 +1,225 @@
+###########################################################################################
+##### Lab 1 - Deploy OpenStack Keystone, Glance, Neutron, Nova, Horizon, Heat, Sahara #####
+###########################################################################################
+
+
+########## Eksekusi di Node openstackX ##########
+
+##### IP, Gateway, DNS Resolver, Hostname #####
+nmtui
+
+### Node Controller ###
+Interface: eth0
+IP Address: 10.X0.X0.10/24
+Gateway: 10.X0.X0.1
+DNS Resolver: 10.X0.X0.1
+
+Interface: eth1
+IP Address: 10.X1.X1.10/24
+
+Hostname: openstackX
+
+
+-----Verifikasi Konektifitas-----
+ping -c 3 10.X0.X0.1
+ping -c 3 10.X0.X0.10
+ping -c 3 10.X1.X1.1
+ping -c 3 10.X1.X1.10
+ping -c 3 8.8.8.8
+
+
+##### Name Resolution #####
+echo "10.X0.X0.10 openstackX" >> /etc/hosts
+
+
+##### Repositori #####
+yum -y install centos-release-openstack-newton.noarch epel-release.noarch
+[ ! -d /etc/yum.repos.d.orig ] && cp -vR /etc/yum.repos.d /etc/yum.repos.d.orig
+yum repolist
+yum -y update
+
+
+##### NTP #####
+yum -y install chrony
+systemctl enable chronyd.service
+systemctl restart chronyd.service
+systemctl status chronyd.service
+chronyc sources
+
+
+##### Firewall #####
+systemctl stop firewalld.service
+systemctl disable firewalld.service
+systemctl status firewalld.service
+
+
+##### Networking #####
+systemctl disable NetworkManager.service
+systemctl stop NetworkManager.service
+systemctl status NetworkManager.service
+systemctl enable network.service
+systemctl restart network.service
+systemctl status network.service
+
+
+##### Paket Utilities #####
+yum -y install vim wget screen crudini
+
+
+### Create Storage Partition ###
+fdisk /dev/vda
+
+vda3 10G 83 (Linux)
+vda4 10G 83 (Linux)
+
+partprobe
+
+### XFS for Swift ###
+mkfs.xfs /dev/vda3
+mkfs.xfs /dev/vda4
+
+
+##### Paket Packstack #####
+yum -y install openstack-packstack.noarch
+
+
+##### Generating Packstack Answer File #####
+packstack --gen-answer-file=os-aio.paf
+vim paf-os-admin-lab1.txt
+
+CONFIG_CINDER_INSTALL=n
+CONFIG_SWIFT_INSTALL=y
+CONFIG_HEAT_INSTALL=y
+CONFIG_NAGIOS_INSTALL=n
+CONFIG_COMPUTE_HOSTS=10.X0.X0.20
+CONFIG_USE_EPEL=y
+#CONFIG_KEYSTONE_ADMIN_PW=9288844cb55f4c64
+CONFIG_KEYSTONE_ADMIN_PW=rahasia
+CONFIG_NEUTRON_ML2_TYPE_DRIVERS=vxlan,vlan,flat
+CONFIG_NEUTRON_ML2_FLAT_NETWORKS=external
+CONFIG_NEUTRON_OVS_BRIDGE_MAPPINGS=external:br-ex
+CONFIG_NEUTRON_OVS_BRIDGE_IFACES=br-ex:eth1
+CONFIG_NEUTRON_OVS_BRIDGES_COMPUTE=br-ex
+CONFIG_PROVISION_DEMO=n
+CONFIG_SWIFT_STORAGES=/dev/vda3,/dev/vda4
+CONFIG_SWIFT_STORAGE_FSTYPE=xfs
+
+
+screen -R packstack
+
+packstack --answer-file=os-aio.paf
+
+### Keluar screen tanpa mematikan tekan Ctrl+A kemudian tekan D
+
+
+##################################
+##### Troubleshoot Packstack #####
+##################################
+
+
+#1 Metadata DHCP Agent
+crudini --set /etc/neutron/dhcp_agent.ini DEFAULT enable_isolated_metadata True
+systemctl restart neutron-dhcp-agent
+systemctl status neutron-dhcp-agent
+
+
+#2. Error: Failed to connect socket to '/var/run/libvirt/virtlogd-sock'
+#Solusi: Aktifkan dan jalankan service virtlogd
+systemctl status virtlogd
+systemctl enable virtlogd
+systemctl restart virtlogd
+systemctl status virtlogd
+
+
+#3. Set Hypervisor KVM
+crudini --set /etc/nova/nova.conf libvirt virt_type kvm
+systemctl restart openstack-nova-compute
+systemctl status openstack-nova-compute
+
+
+#4. Instal paket openstack-sahara-ui
+yum -y install openstack-sahara-ui
+systemctl restart httpd
+systemctl status httpd
+
+
+##### Launch Instance BUI #####
+#Jalankan web browser dan buka alamat http://10.X0.X0.10/dashboard
+
+#0 Login as admin with password PASSWORD
+cat /root/keystonerc_admin
+
+#1 Create images
+Download cirros image
+https://download.cirros-cloud.net/0.3.5/cirros-0.3.5-x86_64-disk.img
+
+Admin > System > Images
+Click Create Image
+Image Name: cirros0
+Image Source: Image Location
+File: Browse cirros-0.3.5-x86_64-disk.img
+Format: QCOW2
+
+#2 Create external network
+Admin > System > Networks
+Click Create Network
+Name: net-ext
+Project: admin
+Provider Network Type: flat
+Physical Network: extnet
+Admin State: Up
+Shared: Checked
+External Network: Checked
+
+#3 Create external subnet
+Admin > System > Networks
+Click net-ext
+Click Create Subnet
+Subnet Name: subnet-ext
+Network Address: 10.X1.X1.0/24
+IP Version: IPv4
+Gateway IP: 10.X1.X1.1
+Enable DHCP: Checked
+Allocation Pools: 10.X1.X1.100,10.X1.X1.199
+DNS Name Servers: 10.X1.X1.1
+
+#4 Add SSH key
+Project > Compute > Access & Security > Key Pairs
+Click Import Key Pair
+Key Pair Name: key0
+Public Key: [copy and paste SSH public key]
+
+#5 Add security group rules
+Project > Compute > Access & Security > Security Groups
+Click Create Security Group
+Name: sg0
+Description: My security group 0
+Click Manage Rules on sg0
+
+Click Add Rule
+Rule: All ICMP
+Direction: Ingress
+Remote: CIDR
+CIDR: 0.0.0.0/0
+
+Click Add Rule
+Rule: All TCP
+Remote: CIDR
+CIDR: 0.0.0.0/0
+
+Click Add Rule
+Rule: All UDP
+Remote: CIDR
+CIDR: 0.0.0.0/0
+
+
+#6 Launch instance
+Project > Compute > Instance
+Click Launch Instance
+Instance Name: instance0
+Flavor: m1.tiny
+Instance Boot Source: Boot from image
+Image Name: cirros0
+Key Pair: key0
+Security Group: sg0
+Selected networks: net-ext
