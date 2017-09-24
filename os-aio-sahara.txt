@@ -89,9 +89,9 @@ vim paf-os-admin-lab1.txt
 
 CONFIG_CINDER_INSTALL=n
 CONFIG_SWIFT_INSTALL=y
+CONFIG_SAHARA_INSTALL=y
 CONFIG_HEAT_INSTALL=y
 CONFIG_NAGIOS_INSTALL=n
-CONFIG_COMPUTE_HOSTS=10.X0.X0.20
 CONFIG_USE_EPEL=y
 #CONFIG_KEYSTONE_ADMIN_PW=9288844cb55f4c64
 CONFIG_KEYSTONE_ADMIN_PW=rahasia
@@ -223,3 +223,138 @@ Image Name: cirros0
 Key Pair: key0
 Security Group: sg0
 Selected networks: net-ext
+
+
+############################################
+##### Lab 2a - Spark Cluster Provision #####
+############################################
+
+#1 Create images
+Download park image:
+http://sahara-files.mirantis.com/images/upstream/newton/sahara-newton-spark-1.6.0-ubuntu.qcow2
+
+Admin > System > Images
+Click Create Image
+Image Name: sahara-newton-spark-1.6.0-ubuntu
+Image Source: Image Location
+File: Browse sahara-newton-spark-1.6.0-ubuntu.qcow2
+Format: QCOW2
+
+
+#2 Image Registry
+Project > Data Processing > Clusters > Image Registry
+Click Register Image
+Image: sahara-newton-spark-1.6.0-ubuntu
+User Name: ubuntu
+Plugin & Version Tag: spark & 1.6.0 Click +
+
+
+#3 Node Group Templates
+Project > Data Processing > Clusters > Node Group Templates
+Click Create Template
+Plugin Name: Apache Spark
+Version: 1.6.0
+
+Template Name: template-master
+OpenStack Flavor: m1.medium
+Availability Zone: nova
+Storage location: Ephemeral Drive
+Base Image: sahara-newton-spark-1.6.0-ubuntu
+Floating IP Pool: do not assign floating IPs
+Auto configure: checked
+HDFS processes: namenode
+Spark processes: master
+Auto security group: Unchecked
+Security Groups: sg0
+
+Click Create Template
+Plugin Name: Apache Spark
+Version: 1.6.0
+
+Template Name: template-worker
+OpenStack Flavor: m1.medium
+Availability Zone: nova
+Storage location: Ephemeral Drive
+Base Image: sahara-newton-spark-1.6.0-ubuntu
+Floating IP Pool: do not assign floating IPs
+Auto configure: checked
+HDFS processes: datanode
+Spark processes: slave
+Auto security group: Unchecked
+Security Groups: sg0
+
+
+#3 Cluster Templates
+Project > Data Processing > Clusters > Cluster Templates
+Click Create Template
+Plugin Name: Apache Spark
+Version: 1.6.0
+
+Template Name: template-cluster-spark
+Auto-configure: checked
+
+Node Groups
+Select: template-master Click +
+Select: template-slave Click +
+
+
+#4 Launch Cluster
+Project > Data Processing > Clusters > Clusters
+Click Launch Cluster
+Plugin Name: Apache Spark
+Version: 1.6.0
+
+Cluster Name: cluster-spark
+Cluster Template: template-cluster-spark
+Cluster Count: 1
+Base Image: sahara-newton-spark-1.6.0-ubuntu
+Keypair: key0
+Neutron Management Network: net-ext
+Click Launch
+
+
+###########################################
+##### Lab 2b - Analytics as a Service #####
+###############s############################
+
+#1 Store spark binary and input file
+Project > Object Store > Containers > +Container
+Container Name: acci
+Download sample_input.txt and spark-wordcount.jar files from this repo
+https://github.com/openstack/sahara-tests/tree/master/sahara_tests/scenario/defaults/edp-examples/edp-spark
+Upload the files to acci container
+
+#2 Job Binaries
+Project > Data Processing > Jobs > Job Binaries
+Click Create Job Binary
+Name: spark-wordcount
+Storage type: Swift
+URL swift: acci/spark-wordcount.jar
+Username: admin
+Password: rahasia
+
+#3 Job Templates
+Project > Data Processing > Jobs > Job Templates
+Click Create Job Template
+Name: job-spark-wordcount
+Job Type: spark
+Choose a main binary: spark-wordcount
+Click Create
+
+4# Launch Job
+Project > Data Processing > Jobs > Job Templates
+Click Launch on Existings Cluster
+Cluster: cluster-spark
+
+Configure:
+Main class: sahara.edp.spark.SparkWordCount
+Configurations:
+edp.spark.adapt_for_swift True
+fs.swift.service.sahara.username admin
+fs.swift.service.sahara.password rahasia
+Arguments:
+swift://acci/sample_input.txt
+swift://acci/output
+Click Launch
+
+Check the job output on container acci
